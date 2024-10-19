@@ -69,7 +69,8 @@
 
         peerConnection.onicecandidate = event => {
           if (event.candidate) {
-            console.log('Candidato ICE enviado:', event.candidate);
+            // Imprimir la dirección IP del candidato ICE
+            console.log('Candidato ICE enviado:', event.candidate.candidate);
             push(ref(database, 'rooms/randomRoom/candidates'), {
               type: 'candidate',
               candidate: event.candidate,
@@ -178,4 +179,3 @@
   </script>
 </body>
 </html>
-
