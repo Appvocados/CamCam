@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Llamada aleatoria con Firebase y WebRTC</title>
-  <link rel="icon" href="favicon.ico" type="image/x-icon"> <!-- Añadir favicon -->
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
@@ -95,20 +94,26 @@
       onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
 
-        if (data && data.offer) {
-          console.log('Oferta recibida:', data.offer);
-          await handleOffer(data.offer);
-        } else if (data && data.answer) {
-          console.log('Respuesta recibida:', data.answer);
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
+        if (data) {
+          // Manejar oferta
+          if (data.offer && !peerConnection.currentRemoteDescription) {
+            console.log('Oferta recibida:', data.offer);
+            await handleOffer(data.offer);
+          }
 
-        // Manejar candidatos ICE
-        if (data && data.candidates) {
-          for (const candidate of data.candidates) {
-            if (candidate) {
-              console.log('Candidato agregado:', candidate);
-              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          // Manejar respuesta
+          if (data.answer) {
+            console.log('Respuesta recibida:', data.answer);
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+
+          // Manejar candidatos ICE
+          if (data.candidates) {
+            for (const candidate of data.candidates) {
+              if (candidate) {
+                console.log('Candidato agregado:', candidate);
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              }
             }
           }
         }
