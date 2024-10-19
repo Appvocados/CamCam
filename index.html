@@ -56,35 +56,41 @@
 
     // Función para iniciar la conexión y obtener el stream local
     async function startConnection() {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: {
-          echoCancellation: true,      // Activar cancelación de eco
-          noiseSuppression: true,      // Activar reducción de ruido
-          autoGainControl: true        // Control automático de ganancia
-        }
-      });
-      localVideo.srcObject = localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+        localVideo.srcObject = localStream;
 
-      // Crear la conexión Peer-to-Peer con WebRTC
-      peerConnection = new RTCPeerConnection(servers);
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        // Crear la conexión Peer-to-Peer con WebRTC
+        peerConnection = new RTCPeerConnection(servers);
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-      peerConnection.onicecandidate = event => {
-        if (event.candidate) {
-          push(ref(database, 'rooms/randomRoom/candidates'), {
-            type: 'candidate',
-            candidate: event.candidate,
-          });
-        }
-      };
+        peerConnection.onicecandidate = event => {
+          if (event.candidate) {
+            console.log('Candidato ICE enviado:', event.candidate);
+            push(ref(database, 'rooms/randomRoom/candidates'), {
+              type: 'candidate',
+              candidate: event.candidate,
+            });
+          }
+        };
 
-      peerConnection.ontrack = event => {
-        remoteVideo.srcObject = event.streams[0];
-      };
+        peerConnection.ontrack = event => {
+          console.log('Stream remoto recibido:', event.streams[0]);
+          remoteVideo.srcObject = event.streams[0];
+        };
 
-      listenForSignalingMessages();  // Escuchar los mensajes de señalización en Firebase
-      toggleButtons(true);
+        listenForSignalingMessages();  // Escuchar los mensajes de señalización en Firebase
+        toggleButtons(true);
+      } catch (error) {
+        console.error('Error al iniciar la conexión:', error);
+      }
     }
 
     // Función para escuchar mensajes de señalización
@@ -93,13 +99,16 @@
         const data = snapshot.val();
 
         if (data.offer) {
-          handleOffer(data.offer);
+          console.log('Oferta recibida:', data.offer);
+          await handleOffer(data.offer);
         } else if (data.answer) {
-          peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          console.log('Respuesta recibida:', data.answer);
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
         } else if (data.candidates) {
           const candidates = data.candidates;
           candidates.forEach(async candidate => {
             if (candidate) {
+              console.log('Candidato agregado:', candidate);
               await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             }
           });
@@ -112,8 +121,7 @@
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-
-      // Enviar respuesta a Firebase
+      console.log('Respuesta enviada:', answer);
       set(ref(database, 'rooms/randomRoom/answer'), answer);
     }
 
@@ -121,8 +129,7 @@
     async function createOffer() {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-
-      // Enviar la oferta a Firebase
+      console.log('Oferta enviada:', offer);
       set(ref(database, 'rooms/randomRoom/offer'), offer);
     }
 
@@ -158,7 +165,7 @@
       hangUpButton.disabled = !inCall;
       newCallButton.disabled = !inCall;
     }
-
+startConnection
     // Cuando se hace clic en "Conectar"
     connectButton.addEventListener('click', async () => {
       await startConnection();
