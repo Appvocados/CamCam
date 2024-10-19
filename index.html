@@ -39,7 +39,7 @@
     // Inicializar Firebase
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
-    const database = getDatabase(app);  // Inicializamos Firebase Realtime Database
+    const database = getDatabase(app);
 
     // Variables globales
     let localStream;
@@ -71,6 +71,7 @@
           if (event.candidate) {
             console.log('Candidato ICE enviado:', event.candidate);
             push(ref(database, 'rooms/randomRoom/candidates'), {
+              type: 'candidate',
               candidate: event.candidate,
             });
           }
@@ -93,26 +94,20 @@
       onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
 
-        if (data) {
-          // Manejar oferta
-          if (data.offer && !peerConnection.currentRemoteDescription) {
-            console.log('Oferta recibida:', data.offer);
-            await handleOffer(data.offer);
-          }
+        if (data && data.offer) {
+          console.log('Oferta recibida:', data.offer);
+          await handleOffer(data.offer);
+        } else if (data && data.answer) {
+          console.log('Respuesta recibida:', data.answer);
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
 
-          // Manejar respuesta
-          if (data.answer) {
-            console.log('Respuesta recibida:', data.answer);
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-          }
-
-          // Manejar candidatos ICE
-          if (data.candidates) {
-            for (const candidate of data.candidates) {
-              if (candidate) {
-                console.log('Candidato agregado:', candidate);
-                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-              }
+        // Manejar candidatos ICE
+        if (data && data.candidates) {
+          for (const candidate of data.candidates) {
+            if (candidate) {
+              console.log('Candidato agregado:', candidate);
+              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             }
           }
         }
@@ -183,3 +178,4 @@
   </script>
 </body>
 </html>
+
