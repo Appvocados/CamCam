@@ -71,7 +71,6 @@
           if (event.candidate) {
             console.log('Candidato ICE enviado:', event.candidate);
             push(ref(database, 'rooms/randomRoom/candidates'), {
-              type: 'candidate',
               candidate: event.candidate,
             });
           }
