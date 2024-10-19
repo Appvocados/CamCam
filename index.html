@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Llamada aleatoria con Firebase y WebRTC</title>
+  <title>Llamada al azar con Firebase y WebRTC</title>
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
@@ -15,7 +15,7 @@
   <button id="hangUp" disabled>Colgar llamada</button>
   <button id="newCall" disabled>Nueva llamada aleatoria</button>
   <div>
-    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="localVideo" autoplay playsinline muted></video> <!-- Video local silenciado -->
     <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
@@ -39,7 +39,7 @@
     // Inicializar Firebase
     const app = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
-    const database = getDatabase(app);
+    const database = getDatabase(app);  // Inicializamos Firebase Realtime Database
 
     // Variables globales
     let localStream;
@@ -56,38 +56,35 @@
 
     // Función para iniciar la conexión y obtener el stream local
     async function startConnection() {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true
-        });
-        localVideo.srcObject = localStream;
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: {
+          echoCancellation: true,      // Activar cancelación de eco
+          noiseSuppression: true,      // Activar reducción de ruido
+          autoGainControl: true        // Control automático de ganancia
+        }
+      });
+      localVideo.srcObject = localStream;
 
-        // Crear la conexión Peer-to-Peer con WebRTC
-        peerConnection = new RTCPeerConnection(servers);
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+      // Crear la conexión Peer-to-Peer con WebRTC
+      peerConnection = new RTCPeerConnection(servers);
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-        peerConnection.onicecandidate = event => {
-          if (event.candidate) {
-            // Imprimir la dirección IP del candidato ICE
-            console.log('Candidato ICE enviado:', event.candidate.candidate);
-            push(ref(database, 'rooms/randomRoom/candidates'), {
-              type: 'candidate',
-              candidate: event.candidate,
-            });
-          }
-        };
+      peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+          push(ref(database, 'rooms/randomRoom/candidates'), {
+            type: 'candidate',
+            candidate: event.candidate,
+          });
+        }
+      };
 
-        peerConnection.ontrack = event => {
-          console.log('Stream remoto recibido:', event.streams[0]);
-          remoteVideo.srcObject = event.streams[0];
-        };
+      peerConnection.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+      };
 
-        listenForSignalingMessages();  // Escuchar los mensajes de señalización en Firebase
-        toggleButtons(true);
-      } catch (error) {
-        console.error('Error al iniciar la conexión:', error);
-      }
+      listenForSignalingMessages();  // Escuchar los mensajes de señalización en Firebase
+      toggleButtons(true);
     }
 
     // Función para escuchar mensajes de señalización
@@ -95,22 +92,17 @@
       onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
 
-        if (data && data.offer) {
-          console.log('Oferta recibida:', data.offer);
-          await handleOffer(data.offer);
-        } else if (data && data.answer) {
-          console.log('Respuesta recibida:', data.answer);
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
-
-        // Manejar candidatos ICE
-        if (data && data.candidates) {
-          for (const candidate of data.candidates) {
+        if (data.offer) {
+          handleOffer(data.offer);
+        } else if (data.answer) {
+          peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } else if (data.candidates) {
+          const candidates = data.candidates;
+          candidates.forEach(async candidate => {
             if (candidate) {
-              console.log('Candidato agregado:', candidate);
               await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             }
-          }
+          });
         }
       });
     }
@@ -120,7 +112,8 @@
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      console.log('Respuesta enviada:', answer);
+
+      // Enviar respuesta a Firebase
       set(ref(database, 'rooms/randomRoom/answer'), answer);
     }
 
@@ -128,7 +121,8 @@
     async function createOffer() {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-      console.log('Oferta enviada:', offer);
+
+      // Enviar la oferta a Firebase
       set(ref(database, 'rooms/randomRoom/offer'), offer);
     }
 
