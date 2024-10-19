@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Llamada al azar con Firebase y WebRTC</title>
+  <title>Llamada aleatoria con Firebase y WebRTC</title>
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
@@ -15,7 +15,7 @@
   <button id="hangUp" disabled>Colgar llamada</button>
   <button id="newCall" disabled>Nueva llamada aleatoria</button>
   <div>
-    <video id="localVideo" autoplay playsinline muted></video> <!-- Video local silenciado -->
+    <video id="localVideo" autoplay playsinline muted></video>
     <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
@@ -59,11 +59,7 @@
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
+          audio: true
         });
         localVideo.srcObject = localStream;
 
@@ -98,20 +94,22 @@
       onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
 
-        if (data.offer) {
+        if (data && data.offer) {
           console.log('Oferta recibida:', data.offer);
           await handleOffer(data.offer);
-        } else if (data.answer) {
+        } else if (data && data.answer) {
           console.log('Respuesta recibida:', data.answer);
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        } else if (data.candidates) {
-          const candidates = data.candidates;
-          candidates.forEach(async candidate => {
+        }
+
+        // Manejar candidatos ICE
+        if (data && data.candidates) {
+          for (const candidate of data.candidates) {
             if (candidate) {
               console.log('Candidato agregado:', candidate);
               await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             }
-          });
+          }
         }
       });
     }
@@ -165,7 +163,7 @@
       hangUpButton.disabled = !inCall;
       newCallButton.disabled = !inCall;
     }
-startConnection
+
     // Cuando se hace clic en "Conectar"
     connectButton.addEventListener('click', async () => {
       await startConnection();
