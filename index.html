@@ -32,7 +32,7 @@
   </form>
 
   <button id="callRandomButton" disabled>Llamar a un usuario al azar</button>
-  <button id="nextCallButton" disabled>Siguiente llamada</button>
+  <button id="nextCallButton" disabled>Realizar otra llamada</button>
   <button id="hangUpButton" disabled>Colgar llamada</button>
   <button id="logout" style="display: none;">Cerrar sesión</button>
 
@@ -81,7 +81,7 @@
       try {
         await set(ref(database, 'users/' + phoneNumber), {
           password,
-          isSearching: false // Inicializa el estado de búsqueda
+          isSearching: false // Estado inicial
         });
         alert('Registro exitoso!');
       } catch (error) {
@@ -104,12 +104,12 @@
           alert('Inicio de sesión exitoso!');
           currentUser = phoneNumber;
           document.getElementById('callRandomButton').disabled = false;
-          document.getElementById('nextCallButton').disabled = true;
           document.getElementById('loginForm').style.display = 'none';
           document.getElementById('logout').style.display = 'inline';
 
-          // Iniciar búsqueda de llamada aleatoria
+          // Cambiar estado a buscando llamada
           await set(ref(database, 'users/' + currentUser + '/isSearching'), true);
+          findRandomCall();
         } else {
           alert('Número de teléfono o contraseña incorrectos.');
         }
@@ -119,24 +119,29 @@
       }
     });
 
-    document.getElementById('callRandomButton').addEventListener('click', async () => {
-      try {
-        const usersRef = ref(database, 'users');
-        const snapshot = await get(usersRef);
+    async function findRandomCall() {
+      const usersRef = ref(database, 'users');
+      onValue(usersRef, (snapshot) => {
         const users = snapshot.val();
         const availableUsers = Object.keys(users).filter(user => user !== currentUser && users[user].isSearching);
 
-        if (availableUsers.length === 0) {
-          alert('No hay usuarios disponibles para llamar.');
-          return;
-        }
+        console.log("Usuarios disponibles:", availableUsers); // Mensaje de depuración
 
-        const randomUser = availableUsers[Math.floor(Math.random() * availableUsers.length)];
-        await startConnection(randomUser);
-      } catch (error) {
-        console.error("Error al realizar la llamada: ", error);
-        alert("Error al realizar la llamada: " + error.message);
-      }
+        if (availableUsers.length > 0) {
+          const randomUser = availableUsers[Math.floor(Math.random() * availableUsers.length)];
+          console.log("Conectando a:", randomUser); // Mensaje de depuración
+          startConnection(randomUser);
+        } else {
+          console.log("No hay usuarios disponibles para llamar."); // Mensaje de depuración
+        }
+      });
+    }
+
+    document.getElementById('callRandomButton').addEventListener('click', async () => {
+      console.log("Llamar a un usuario al azar clicado."); // Mensaje de depuración
+      // Cambiar estado a buscando llamada
+      await set(ref(database, 'users/' + currentUser + '/isSearching'), true);
+      findRandomCall();
     });
 
     async function startConnection(remoteNumber) {
@@ -156,56 +161,39 @@
       };
 
       peerConnection.ontrack = event => {
-        const remoteVideo = document.getElementById('remoteVideo');
-        if (remoteVideo.srcObject !== event.streams[0]) {
-          remoteVideo.srcObject = event.streams[0];
-        }
+        document.getElementById('remoteVideo').srcObject = event.streams[0];
       };
 
       listenForSignalingMessages(remoteNumber);
 
-      // Actualiza el estado de búsqueda
+      // Cambiar el estado de búsqueda a en llamada
       await set(ref(database, 'users/' + currentUser + '/isSearching'), false);
       await set(ref(database, 'users/' + remoteNumber + '/isSearching'), false);
-      
+
+      // Habilitar botones adecuados
       document.getElementById('hangUpButton').disabled = false;
       document.getElementById('nextCallButton').disabled = false;
-      document.getElementById('callRandomButton').disabled = true; // Desactiva el botón de llamada aleatoria
+      document.getElementById('callRandomButton').disabled = true; // Desactivar botón de llamada al azar
     }
 
     function listenForSignalingMessages(remoteNumber) {
-      const remoteRef = ref(database, 'users/' + remoteNumber);
-
-      onValue(remoteRef, (snapshot) => {
+      onValue(ref(database, 'users/' + remoteNumber), (snapshot) => {
         const data = snapshot.val();
-        
-        if (data) {
-          // Manejar oferta
-          if (data.offer && !peerConnection.currentRemoteDescription) {
-            peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer)).then(async () => {
-              const answer = await peerConnection.createAnswer();
-              await peerConnection.setLocalDescription(answer);
-
-              // Enviar la respuesta al usuario remoto
-              await set(ref(database, 'users/' + remoteNumber + '/answer'), {
-                type: 'answer',
-                sdp: answer.sdp,
-              });
-            }).catch(error => {
-              console.error("Error al establecer la descripción remota: ", error);
+        if (data && data.offer) {
+          peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer)).then(async () => {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            set(ref(database, 'users/' + remoteNumber + '/answer'), {
+              type: 'answer',
+              sdp: answer.sdp,
             });
-          }
+          });
+        }
 
-          // Manejar candidatos ICE
-          if (data.candidates) {
-            for (const key in data.candidates) {
-              const candidate = data.candidates[key];
-              if (candidate) {
-                peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(error => {
-                  console.error("Error al agregar el candidato ICE: ", error);
-                });
-              }
-            }
+        if (data && data.candidates) {
+          for (const key in data.candidates) {
+            const candidate = data.candidates[key];
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
           }
         }
       });
@@ -214,8 +202,6 @@
     document.getElementById('hangUpButton').addEventListener('click', hangUpCall);
 
     async function hangUpCall() {
-      await set(ref(database, 'users/' + currentUser + '/isSearching'), false);
-      await set(ref(database, 'users/' + remoteNumber + '/isSearching'), false);
       if (peerConnection) {
         peerConnection.close();
         peerConnection = null;
@@ -224,24 +210,21 @@
       document.getElementById('localVideo').srcObject = null;
       document.getElementById('remoteVideo').srcObject = null;
 
+      // Cambiar el estado a no buscar
+      await set(ref(database, 'users/' + currentUser + '/isSearching'), false);
       document.getElementById('hangUpButton').disabled = true;
       document.getElementById('nextCallButton').disabled = true;
-      document.getElementById('callRandomButton').disabled = false; // Reactiva el botón de llamada al azar
+      document.getElementById('callRandomButton').disabled = false;
     }
-
-    document.getElementById('nextCallButton').addEventListener('click', async () => {
-      hangUpCall(); // Cuelga la llamada actual antes de iniciar una nueva
-      document.getElementById('callRandomButton').click(); // Realiza otra llamada al azar
-    });
 
     document.getElementById('logout').addEventListener('click', () => {
       currentUser = null;
+      hangUpCall(); // Cerrar cualquier llamada activa al cerrar sesión
       document.getElementById('callRandomButton').disabled = true;
-      document.getElementById('nextCallButton').disabled = true;
-      document.getElementById('hangUpButton').disabled = true;
       document.getElementById('loginForm').style.display = 'block';
       document.getElementById('logout').style.display = 'none';
     });
+
   </script>
 </body>
 </html>
