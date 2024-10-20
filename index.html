@@ -3,106 +3,289 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Videollamada WebRTC</title>
+  <title>Llamada al azar con Firebase y WebRTC</title>
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
+    form { margin-bottom: 20px; }
+    .video-container {
+      position: relative;
+      display: inline-block;
+    }
+    .user-info {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      width: 100%;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <h1>Llamada WebRTC</h1>
-  <button id="connect">Conectar</button>
+  <h1>Llamada aleatoria</h1>
+
+  <!-- Formulario de inicio de sesión -->
+  <form id="loginForm">
+    <input type="text" id="loginPhoneNumber" placeholder="Número de teléfono" required>
+    <input type="password" id="loginPassword" placeholder="Contraseña" required>
+    <button type="submit">Iniciar sesión</button>
+    <button type="button" id="registerButton">Registrar</button>
+  </form>
+
+  <!-- Formulario de registro (inicialmente oculto) -->
+  <form id="registrationForm" style="display: none;">
+    <input type="text" id="phoneNumber" placeholder="Número de teléfono" required>
+    <input type="text" id="name" placeholder="Nombre" required>
+    <input type="number" id="age" placeholder="Edad" required>
+    <input type="text" id="country" placeholder="País" required>
+    <select id="gender" required>
+      <option value="">Seleccionar género</option>
+      <option value="hombre">Hombre</option>
+      <option value="mujer">Mujer</option>
+    </select>
+    <input type="password" id="password" placeholder="Contraseña" required>
+    <button type="submit">Registrar</button>
+    <button type="button" id="backToLoginButton">Volver a Iniciar Sesión</button>
+  </form>
+
+  <button id="connect" disabled>Conectar con usuario aleatorio</button>
   <button id="hangUp" disabled>Colgar llamada</button>
-  <button id="nextCall" disabled>Siguiente llamada</button>
-  <div>
+  <button id="newCall" disabled>Nueva llamada aleatoria</button>
+  <button id="logout" style="display: none;">Cerrar sesión</button>
+
+  <div class="video-container">
     <video id="localVideo" autoplay playsinline muted></video>
-    <video id="remoteVideo" autoplay playsinline></video>
+    <div class="user-info" id="userInfo"></div>
   </div>
 
-  <script>
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue, push, remove, get } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDsDCy3v3C1gqljqkAHyCJABY4A84GJ6II",
+      authDomain: "camcam-3e7e5.firebaseapp.com",
+      databaseURL: "https://camcam-3e7e5-default-rtdb.firebaseio.com/",
+      projectId: "camcam-3e7e5",
+      storageBucket: "camcam-3e7e5.appspot.com",
+      messagingSenderId: "791203954656",
+      appId: "1:791203954656:web:33edd9fa568e9c456f3585",
+      measurementId: "G-HKEEPVZXS0"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
 
     let localStream;
     let peerConnection;
-    const ws = new WebSocket('wss://echo.websocket.org'); // Cambia esto a tu servidor WebSocket
+    let roomRef;
     const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let currentUser = null;
 
-    ws.onmessage = async (message) => {
-      const data = JSON.parse(message.data);
-      if (data.offer) {
-        await handleOffer(data.offer);
-      } else if (data.answer) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-      } else if (data.candidate) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+    const connectButton = document.getElementById('connect');
+    const hangUpButton = document.getElementById('hangUp');
+    const newCallButton = document.getElementById('newCall');
+    const logoutButton = document.getElementById('logout');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const registrationForm = document.getElementById('registrationForm');
+    const loginForm = document.getElementById('loginForm');
+    const userInfoDiv = document.getElementById('userInfo');
+
+    document.getElementById('registerButton').addEventListener('click', () => {
+      loginForm.style.display = 'none';
+      registrationForm.style.display = 'block';
+    });
+
+    document.getElementById('backToLoginButton').addEventListener('click', () => {
+      registrationForm.style.display = 'none';
+      loginForm.style.display = 'block';
+    });
+
+    registrationForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const phoneNumber = document.getElementById('phoneNumber').value;
+      const name = document.getElementById('name').value;
+      const age = document.getElementById('age').value;
+      const country = document.getElementById('country').value;
+      const gender = document.getElementById('gender').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        await push(ref(database, 'users'), {
+          phoneNumber,
+          name,
+          age,
+          country,
+          gender,
+          password
+        });
+
+        alert('Registro exitoso!');
+        currentUser = { phoneNumber, name, age, country, gender };
+        updateUIAfterLogin();
+      } catch (error) {
+        console.error("Error al registrar usuario: ", error);
+        alert("Error al registrar el usuario: " + error.message);
       }
-    };
+    });
+
+    loginForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const phoneNumber = document.getElementById('loginPhoneNumber').value;
+      const password = document.getElementById('loginPassword').value;
+
+      try {
+        const snapshot = await get(ref(database, 'users'));
+        const users = snapshot.val();
+        let foundUser = null;
+
+        for (const key in users) {
+          if (users[key].phoneNumber === phoneNumber && users[key].password === password) {
+            foundUser = users[key];
+            break;
+          }
+        }
+
+        if (foundUser) {
+          alert('Inicio de sesión exitoso!');
+          currentUser = foundUser;
+          updateUIAfterLogin();
+          roomRef = ref(database, 'rooms/' + currentUser.phoneNumber); // Crear una referencia única para cada usuario
+        } else {
+          alert('Número de teléfono o contraseña incorrectos.');
+        }
+      } catch (error) {
+        console.error("Error al iniciar sesión: ", error);
+        alert("Error al iniciar sesión: " + error.message);
+      }
+    });
+
+    function updateUIAfterLogin() {
+      loginForm.style.display = 'none';
+      registrationForm.style.display = 'none';
+      logoutButton.style.display = 'inline';
+      connectButton.disabled = false;
+
+      userInfoDiv.innerHTML = `<strong>Nombre:</strong> ${currentUser.name}<br>
+                               <strong>Edad:</strong> ${currentUser.age}<br>
+                               <strong>País:</strong> ${currentUser.country}<br>
+                               <strong>Género:</strong> ${currentUser.gender}`;
+    }
 
     async function startConnection() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
 
       peerConnection = new RTCPeerConnection(servers);
+
       localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
       peerConnection.onicecandidate = event => {
         if (event.candidate) {
-          ws.send(JSON.stringify({ candidate: event.candidate }));
+          push(ref(roomRef, 'candidates'), {
+            type: 'candidate',
+            candidate: event.candidate,
+          });
         }
       };
 
       peerConnection.ontrack = event => {
         remoteVideo.srcObject = event.streams[0];
       };
-    }
 
-    async function createOffer() {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      ws.send(JSON.stringify({ offer }));
-    }
-
-    async function handleOffer(offer) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      ws.send(JSON.stringify({ answer }));
-    }
-
-    function hangUp() {
-      if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-      }
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-      remoteVideo.srcObject = null;
-      toggleButtons(false);
-    }
-
-    function toggleButtons(inCall) {
-      document.getElementById('connect').disabled = inCall;
-      document.getElementById('hangUp').disabled = !inCall;
-      document.getElementById('nextCall').disabled = !inCall;
-    }
-
-    document.getElementById('connect').addEventListener('click', async () => {
-      await startConnection();
-      createOffer();
+      listenForSignalingMessages();
       toggleButtons(true);
+    }
+
+    function listenForSignalingMessages() {
+      onValue(roomRef, async (snapshot) => {
+        const data = snapshot.val();
+
+        if (data) {
+          if (data.offer && !peerConnection.remoteDescription) {
+            try {
+              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              set(ref(roomRef, 'answer'), answer);
+            } catch (error) {
+              console.error('Error al manejar la oferta: ', error);
+            }
+          }
+
+          if (data.answer && peerConnection.remoteDescription) {
+            try {
+              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } catch (error) {
+              console.error('Error al establecer la descripción remota: ', error);
+            }
+          }
+
+          if (data.candidates) {
+            data.candidates.forEach(async (candidate) => {
+              try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (error) {
+                console.error('Error al agregar candidato ICE: ', error);
+              }
+            });
+          }
+        }
+      });
+    }
+
+    connectButton.addEventListener('click', async () => {
+      await startConnection();
+      const roomKey = prompt("Introduce la clave de la sala:");
+      roomRef = ref(database, 'rooms/' + roomKey);
+      connectButton.disabled = true;
     });
 
-    document.getElementById('hangUp').addEventListener('click', () => {
+    hangUpButton.addEventListener('click', async () => {
       hangUp();
     });
 
-    document.getElementById('nextCall').addEventListener('click', async () => {
-      hangUp();  // Colgar la llamada actual
-      await startConnection(); // Iniciar nueva conexión
-      createOffer(); // Crear nueva oferta
+    function hangUp() {
+      peerConnection.close();
+      peerConnection = null;
+      toggleButtons(false);
+      remove(roomRef); // Eliminar la referencia de la sala
+      localStream.getTracks().forEach(track => track.stop());
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+    }
+
+    function toggleButtons(isConnected) {
+      hangUpButton.disabled = !isConnected;
+      newCallButton.disabled = isConnected;
+    }
+
+    newCallButton.addEventListener('click', async () => {
+      if (peerConnection) {
+        hangUp();
+      }
+      await startConnection();
+      const randomRoomKey = Date.now(); // Generar una clave de sala aleatoria
+      roomRef = ref(database, 'rooms/' + randomRoomKey);
+      set(roomRef, {}); // Crear la carpeta rooms
+      connectButton.disabled = true;
+    });
+
+    logoutButton.addEventListener('click', () => {
+      currentUser = null;
+      loginForm.style.display = 'block';
+      logoutButton.style.display = 'none';
+      connectButton.disabled = true;
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+      if (peerConnection) {
+        hangUp();
+      }
     });
   </script>
 </body>
