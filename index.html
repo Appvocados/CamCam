@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Llamada al azar con Firebase y WebRTC</title>
+  <title>Llamada al Azar</title>
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
@@ -12,21 +12,11 @@
       position: relative;
       display: inline-block;
     }
-    .user-info {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      background: rgba(0, 0, 0, 0.5);
-      color: white;
-      width: 100%;
-      text-align: center;
-    }
   </style>
 </head>
 <body>
-  <h1>Llamada aleatoria</h1>
+  <h1>Llamada al Azar</h1>
 
-  <!-- Formulario de inicio de sesión -->
   <form id="loginForm">
     <input type="text" id="loginPhoneNumber" placeholder="Número de teléfono" required>
     <input type="password" id="loginPassword" placeholder="Contraseña" required>
@@ -34,37 +24,26 @@
     <button type="button" id="registerButton">Registrar</button>
   </form>
 
-  <!-- Formulario de registro (inicialmente oculto) -->
   <form id="registrationForm" style="display: none;">
     <input type="text" id="phoneNumber" placeholder="Número de teléfono" required>
-    <input type="text" id="name" placeholder="Nombre" required>
-    <input type="number" id="age" placeholder="Edad" required>
-    <input type="text" id="country" placeholder="País" required>
-    <select id="gender" required>
-      <option value="">Seleccionar género</option>
-      <option value="hombre">Hombre</option>
-      <option value="mujer">Mujer</option>
-    </select>
     <input type="password" id="password" placeholder="Contraseña" required>
     <button type="submit">Registrar</button>
     <button type="button" id="backToLoginButton">Volver a Iniciar Sesión</button>
   </form>
 
-  <button id="connect" disabled>Conectar con usuario aleatorio</button>
-  <button id="hangUp" disabled>Colgar llamada</button>
-  <button id="newCall" disabled>Nueva llamada aleatoria</button>
+  <button id="callRandomButton" disabled>Llamar a un usuario al azar</button>
+  <button id="nextCallButton" disabled>Siguiente llamada</button>
+  <button id="hangUpButton" disabled>Colgar llamada</button>
   <button id="logout" style="display: none;">Cerrar sesión</button>
 
   <div class="video-container">
     <video id="localVideo" autoplay playsinline muted></video>
-    <div class="user-info" id="userInfo"></div>
   </div>
-
   <video id="remoteVideo" autoplay playsinline></video>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-    import { getDatabase, ref, set, onValue, push, remove, get } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+    import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDsDCy3v3C1gqljqkAHyCJABY4A84GJ6II",
@@ -76,86 +55,57 @@
       appId: "1:791203954656:web:33edd9fa568e9c456f3585",
       measurementId: "G-HKEEPVZXS0"
     };
-
     const app = initializeApp(firebaseConfig);
     const database = getDatabase(app);
 
     let localStream;
     let peerConnection;
-    let roomRef;
     const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     let currentUser = null;
 
-    const connectButton = document.getElementById('connect');
-    const hangUpButton = document.getElementById('hangUp');
-    const newCallButton = document.getElementById('newCall');
-    const logoutButton = document.getElementById('logout');
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-    const registrationForm = document.getElementById('registrationForm');
-    const loginForm = document.getElementById('loginForm');
-    const userInfoDiv = document.getElementById('userInfo');
-
     document.getElementById('registerButton').addEventListener('click', () => {
-      loginForm.style.display = 'none';
-      registrationForm.style.display = 'block';
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registrationForm').style.display = 'block';
     });
 
     document.getElementById('backToLoginButton').addEventListener('click', () => {
-      registrationForm.style.display = 'none';
-      loginForm.style.display = 'block';
+      document.getElementById('registrationForm').style.display = 'none';
+      document.getElementById('loginForm').style.display = 'block';
     });
 
-    registrationForm.addEventListener('submit', async (event) => {
+    document.getElementById('registrationForm').addEventListener('submit', async (event) => {
       event.preventDefault();
       const phoneNumber = document.getElementById('phoneNumber').value;
-      const name = document.getElementById('name').value;
-      const age = document.getElementById('age').value;
-      const country = document.getElementById('country').value;
-      const gender = document.getElementById('gender').value;
       const password = document.getElementById('password').value;
 
       try {
-        await push(ref(database, 'users'), {
-          phoneNumber,
-          name,
-          age,
-          country,
-          gender,
+        await set(ref(database, 'users/' + phoneNumber), {
           password
         });
-
         alert('Registro exitoso!');
-        currentUser = { phoneNumber, name, age, country, gender };
-        updateUIAfterLogin();
       } catch (error) {
         console.error("Error al registrar usuario: ", error);
         alert("Error al registrar el usuario: " + error.message);
       }
     });
 
-    loginForm.addEventListener('submit', async (event) => {
+    document.getElementById('loginForm').addEventListener('submit', async (event) => {
       event.preventDefault();
       const phoneNumber = document.getElementById('loginPhoneNumber').value;
       const password = document.getElementById('loginPassword').value;
 
       try {
-        const snapshot = await get(ref(database, 'users'));
-        const users = snapshot.val();
-        let foundUser = null;
+        const userRef = ref(database, 'users/' + phoneNumber);
+        const snapshot = await get(userRef);
+        const userData = snapshot.val();
 
-        for (const key in users) {
-          if (users[key].phoneNumber === phoneNumber && users[key].password === password) {
-            foundUser = users[key];
-            break;
-          }
-        }
-
-        if (foundUser) {
+        if (userData && userData.password === password) {
           alert('Inicio de sesión exitoso!');
-          currentUser = foundUser;
-          updateUIAfterLogin();
-          roomRef = ref(database, 'rooms/' + currentUser.phoneNumber); // Crear una referencia única para cada usuario
+          currentUser = phoneNumber;
+          document.getElementById('callRandomButton').disabled = false;
+          document.getElementById('nextCallButton').disabled = true; // Disable next call button initially
+          document.getElementById('loginForm').style.display = 'none';
+          document.getElementById('logout').style.display = 'inline';
         } else {
           alert('Número de teléfono o contraseña incorrectos.');
         }
@@ -165,29 +115,36 @@
       }
     });
 
-    function updateUIAfterLogin() {
-      loginForm.style.display = 'none';
-      registrationForm.style.display = 'none';
-      logoutButton.style.display = 'inline';
-      connectButton.disabled = false;
+    document.getElementById('callRandomButton').addEventListener('click', async () => {
+      try {
+        const usersRef = ref(database, 'users');
+        const snapshot = await get(usersRef);
+        const users = snapshot.val();
+        const availableUsers = Object.keys(users).filter(user => user !== currentUser);
 
-      userInfoDiv.innerHTML = `<strong>Nombre:</strong> ${currentUser.name}<br>
-                               <strong>Edad:</strong> ${currentUser.age}<br>
-                               <strong>País:</strong> ${currentUser.country}<br>
-                               <strong>Género:</strong> ${currentUser.gender}`;
-    }
+        if (availableUsers.length === 0) {
+          alert('No hay usuarios disponibles para llamar.');
+          return;
+        }
 
-    async function startConnection() {
+        const randomUser = availableUsers[Math.floor(Math.random() * availableUsers.length)];
+        await startConnection(randomUser);
+      } catch (error) {
+        console.error("Error al realizar la llamada: ", error);
+        alert("Error al realizar la llamada: " + error.message);
+      }
+    });
+
+    async function startConnection(remoteNumber) {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
+      document.getElementById('localVideo').srcObject = localStream;
 
       peerConnection = new RTCPeerConnection(servers);
-
       localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
       peerConnection.onicecandidate = event => {
         if (event.candidate) {
-          push(ref(roomRef, 'candidates'), {
+          set(ref(database, 'users/' + remoteNumber + '/candidates/' + currentUser), {
             type: 'candidate',
             candidate: event.candidate,
           });
@@ -195,98 +152,68 @@
       };
 
       peerConnection.ontrack = event => {
-        remoteVideo.srcObject = event.streams[0];
+        document.getElementById('remoteVideo').srcObject = event.streams[0];
       };
 
-      listenForSignalingMessages();
-      toggleButtons(true);
+      listenForSignalingMessages(remoteNumber);
+
+      // Habilitar el botón de "Siguiente llamada" y deshabilitar el botón de "Llamar a un usuario al azar"
+      document.getElementById('nextCallButton').disabled = false;
+      document.getElementById('callRandomButton').disabled = true;
     }
 
-    function listenForSignalingMessages() {
-      onValue(roomRef, async (snapshot) => {
+    function listenForSignalingMessages(remoteNumber) {
+      onValue(ref(database, 'users/' + remoteNumber), (snapshot) => {
         const data = snapshot.val();
-
-        if (data) {
-          if (data.offer && !peerConnection.remoteDescription) {
-            try {
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-              const answer = await peerConnection.createAnswer();
-              await peerConnection.setLocalDescription(answer);
-              set(ref(roomRef, 'answer'), answer);
-            } catch (error) {
-              console.error('Error al manejar la oferta: ', error);
+        if (data && data.offer) {
+          peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer)).then(async () => {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            set(ref(database, 'users/' + remoteNumber + '/answer'), answer);
+          });
+        }
+        if (data && data.candidates) {
+          for (const key in data.candidates) {
+            const candidate = data.candidates[key];
+            if (candidate.type === 'candidate') {
+              peerConnection.addIceCandidate(new RTCIceCandidate(candidate.candidate));
             }
-          }
-
-          if (data.answer && peerConnection.remoteDescription) {
-            try {
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            } catch (error) {
-              console.error('Error al establecer la descripción remota: ', error);
-            }
-          }
-
-          if (data.candidates) {
-            data.candidates.forEach(async (candidate) => {
-              try {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (error) {
-                console.error('Error al agregar candidato ICE: ', error);
-              }
-            });
           }
         }
       });
     }
 
-    connectButton.addEventListener('click', async () => {
-      await startConnection();
-      const roomKey = prompt("Introduce la clave de la sala:");
-      roomRef = ref(database, 'rooms/' + roomKey);
-      connectButton.disabled = true;
+    document.getElementById('hangUpButton').addEventListener('click', () => {
+      hangUpCall();
     });
 
-    hangUpButton.addEventListener('click', async () => {
-      hangUp();
+    document.getElementById('nextCallButton').addEventListener('click', async () => {
+      hangUpCall();
+      document.getElementById('callRandomButton').click(); // Trigger random call
     });
 
-    function hangUp() {
-      peerConnection.close();
-      peerConnection = null;
-      toggleButtons(false);
-      remove(roomRef); // Eliminar la referencia de la sala
-      localStream.getTracks().forEach(track => track.stop());
-      localVideo.srcObject = null;
-      remoteVideo.srcObject = null;
-    }
-
-    function toggleButtons(isConnected) {
-      hangUpButton.disabled = !isConnected;
-      newCallButton.disabled = isConnected;
-    }
-
-    newCallButton.addEventListener('click', async () => {
+    function hangUpCall() {
       if (peerConnection) {
-        hangUp();
+        peerConnection.close();
+        peerConnection = null;
       }
-      await startConnection();
-      const randomRoomKey = Date.now(); // Generar una clave de sala aleatoria
-      roomRef = ref(database, 'rooms/' + randomRoomKey);
-      set(roomRef, {}); // Crear la carpeta rooms
-      connectButton.disabled = true;
-    });
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+      document.getElementById('localVideo').srcObject = null;
+      document.getElementById('remoteVideo').srcObject = null;
+      document.getElementById('nextCallButton').disabled = true; // Disable next call button
+      document.getElementById('callRandomButton').disabled = false; // Enable random call button
+    }
 
-    logoutButton.addEventListener('click', () => {
+    document.getElementById('logout').addEventListener('click', () => {
       currentUser = null;
-      loginForm.style.display = 'block';
-      logoutButton.style.display = 'none';
-      connectButton.disabled = true;
-      localVideo.srcObject = null;
-      remoteVideo.srcObject = null;
-      if (peerConnection) {
-        hangUp();
-      }
+      hangUpCall(); // Close any ongoing call when logging out
+      document.getElementById('callRandomButton').disabled = true;
+      document.getElementById('loginForm').style.display = 'block';
+      document.getElementById('logout').style.display = 'none';
     });
+
   </script>
 </body>
 </html>
