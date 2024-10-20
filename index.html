@@ -3,173 +3,107 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Llamada al azar con Firebase y WebRTC</title>
+  <title>Videollamada WebRTC</title>
   <style>
     video { width: 300px; height: 200px; background: #000; margin: 10px; }
     button { margin-top: 20px; padding: 10px; }
   </style>
 </head>
 <body>
-  <h1>Llamada aleatoria</h1>
-  <button id="connect">Conectar con usuario aleatorio</button>
+  <h1>Llamada WebRTC</h1>
+  <button id="connect">Conectar</button>
   <button id="hangUp" disabled>Colgar llamada</button>
-  <button id="newCall" disabled>Nueva llamada aleatoria</button>
+  <button id="nextCall" disabled>Siguiente llamada</button>
   <div>
-    <video id="localVideo" autoplay playsinline muted></video> <!-- Video local silenciado -->
+    <video id="localVideo" autoplay playsinline muted></video>
     <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
-  <script type="module">
-    // Importar las funciones necesarias de Firebase
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics.js";
-    import { getDatabase, ref, set, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
-
-    // Tu configuración de Firebase
-    const firebaseConfig = {
-      apiKey: "AIzaSyDsDCy3v3C1gqljqkAHyCJABY4A84GJ6II",
-      authDomain: "camcam-3e7e5.firebaseapp.com",
-      projectId: "camcam-3e7e5",
-      storageBucket: "camcam-3e7e5.appspot.com",
-      messagingSenderId: "791203954656",
-      appId: "1:791203954656:web:33edd9fa568e9c456f3585",
-      measurementId: "G-HKEEPVZXS0"
-    };
-
-    // Inicializar Firebase
-    const app = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app);
-    const database = getDatabase(app);  // Inicializamos Firebase Realtime Database
-
-    // Variables globales
-    let localStream;
-    let peerConnection;
-    let roomRef = ref(database, 'rooms/randomRoom'); // Referencia a la sala de señalización
-    const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
-    // Botones
-    const connectButton = document.getElementById('connect');
-    const hangUpButton = document.getElementById('hangUp');
-    const newCallButton = document.getElementById('newCall');
+  <script>
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
 
-    // Función para iniciar la conexión y obtener el stream local
+    let localStream;
+    let peerConnection;
+    const ws = new WebSocket('wss://echo.websocket.org'); // Cambia esto a tu servidor WebSocket
+    const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    ws.onmessage = async (message) => {
+      const data = JSON.parse(message.data);
+      if (data.offer) {
+        await handleOffer(data.offer);
+      } else if (data.answer) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+      }
+    };
+
     async function startConnection() {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: {
-          echoCancellation: true,      // Activar cancelación de eco
-          noiseSuppression: true,      // Activar reducción de ruido
-          autoGainControl: true        // Control automático de ganancia
-        }
-      });
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
 
-      // Crear la conexión Peer-to-Peer con WebRTC
       peerConnection = new RTCPeerConnection(servers);
       localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
       peerConnection.onicecandidate = event => {
         if (event.candidate) {
-          push(ref(database, 'rooms/randomRoom/candidates'), {
-            type: 'candidate',
-            candidate: event.candidate,
-          });
+          ws.send(JSON.stringify({ candidate: event.candidate }));
         }
       };
 
       peerConnection.ontrack = event => {
         remoteVideo.srcObject = event.streams[0];
       };
-
-      listenForSignalingMessages();  // Escuchar los mensajes de señalización en Firebase
-      toggleButtons(true);
     }
 
-    // Función para escuchar mensajes de señalización
-    function listenForSignalingMessages() {
-      onValue(roomRef, async (snapshot) => {
-        const data = snapshot.val();
-
-        if (data.offer) {
-          handleOffer(data.offer);
-        } else if (data.answer) {
-          peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        } else if (data.candidates) {
-          const candidates = data.candidates;
-          candidates.forEach(async candidate => {
-            if (candidate) {
-              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-          });
-        }
-      });
+    async function createOffer() {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      ws.send(JSON.stringify({ offer }));
     }
 
-    // Función para manejar una oferta recibida
     async function handleOffer(offer) {
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-
-      // Enviar respuesta a Firebase
-      set(ref(database, 'rooms/randomRoom/answer'), answer);
+      ws.send(JSON.stringify({ answer }));
     }
 
-    // Función para crear una oferta y enviarla a Firebase
-    async function createOffer() {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      // Enviar la oferta a Firebase
-      set(ref(database, 'rooms/randomRoom/offer'), offer);
-    }
-
-    // Función para colgar la llamada actual
     function hangUp() {
       if (peerConnection) {
-        peerConnection.close();  // Cierra la conexión WebRTC
+        peerConnection.close();
         peerConnection = null;
       }
-
-      // Detener el stream local
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
       }
-
-      // Limpiar la señalización en Firebase
-      remove(roomRef);  // Eliminar la sala de la base de datos
       remoteVideo.srcObject = null;
       toggleButtons(false);
     }
 
-    // Función para realizar una nueva llamada aleatoria
-    async function newCall() {
-      hangUp();  // Colgar la llamada anterior
-      await startConnection();
-      createOffer();  // Iniciar una nueva oferta
-    }
-
-    // Función para habilitar/deshabilitar los botones
     function toggleButtons(inCall) {
-      connectButton.disabled = inCall;
-      hangUpButton.disabled = !inCall;
-      newCallButton.disabled = !inCall;
+      document.getElementById('connect').disabled = inCall;
+      document.getElementById('hangUp').disabled = !inCall;
+      document.getElementById('nextCall').disabled = !inCall;
     }
 
-    // Cuando se hace clic en "Conectar"
-    connectButton.addEventListener('click', async () => {
+    document.getElementById('connect').addEventListener('click', async () => {
       await startConnection();
       createOffer();
+      toggleButtons(true);
     });
 
-    // Cuando se hace clic en "Colgar"
-    hangUpButton.addEventListener('click', hangUp);
+    document.getElementById('hangUp').addEventListener('click', () => {
+      hangUp();
+    });
 
-    // Cuando se hace clic en "Nueva llamada"
-    newCallButton.addEventListener('click', newCall);
+    document.getElementById('nextCall').addEventListener('click', async () => {
+      hangUp();  // Colgar la llamada actual
+      await startConnection(); // Iniciar nueva conexión
+      createOffer(); // Crear nueva oferta
+    });
   </script>
 </body>
 </html>
